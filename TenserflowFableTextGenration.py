@@ -5,6 +5,13 @@ import numpy as np
 import os
 import time
 
+tf_config = {
+    'cluster': {
+        'worker': ['localhost:12345', 'localhost:23456']
+    },
+    'task': {'type': 'worker', 'index': 0}
+}
+
 #Read text back when given ids
 def text_from_ids(ids):
   return tf.strings.reduce_join(chars_from_ids(ids), axis=-1)
@@ -82,11 +89,23 @@ vocab_size = len(vocab)
 embedding_dim = 256
 rnn_units = 1024
 
-model = MyModel(
-    # Be sure the vocabulary size matches the `StringLookup` layers.
-    vocab_size=len(ids_from_chars.get_vocabulary()),
-    embedding_dim=embedding_dim,
-    rnn_units=rnn_units)
+#Train on Multiple Computers
+communication_options = tf.distribute.experimental.CommunicationOptions(
+    implementation=tf.distribute.experimental.CommunicationImplementation.AUTO)
+
+strategy = tf.distribute.MultiWorkerMirroredStrategy(
+    communication_options=communication_options)
+
+
+print('Starting Distrubuation!')
+
+with strategy.scope():
+  model = MyModel(
+      # Be sure the vocabulary size matches the `StringLookup` layers.
+      vocab_size=len(ids_from_chars.get_vocabulary()),
+      embedding_dim=embedding_dim,
+      rnn_units=rnn_units)
+  model.compile(optimizer='adam', loss=tf.losses.SparseCategoricalCrossentropy(from_logits=True))
 
 for input_example_batch, target_example_batch in dataset.take(1):
     example_batch_predictions = model(input_example_batch)
@@ -108,18 +127,18 @@ print("Mean loss:        ", mean_loss)
 
 tf.exp(mean_loss).numpy()
 
-model.compile(optimizer='adam', loss=loss)
+#model.compile(optimizer='adam', loss=loss) (moved)
 
 # Directory where the checkpoints will be saved
-checkpoint_dir = './training_checkpoints'
+#checkpoint_dir = './training_checkpoints'
 # Name of the checkpoint files
-checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt_{epoch}")
+#checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt_{epoch}")
 
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-    filepath=checkpoint_prefix,
-    save_weights_only=True)
+#checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+    #filepath=checkpoint_prefix,
+   # save_weights_only=True)
 
-history = model.fit(dataset, epochs=25, callbacks=[checkpoint_callback])
+history = model.fit(dataset, epochs=25, workers=1)#callbacks=[checkpoint_callback])
 
 class OneStep(tf.keras.Model):
   def __init__(self, model, chars_from_ids, ids_from_chars, temperature=1.0):
